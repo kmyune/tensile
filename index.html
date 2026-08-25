@@ -1,0 +1,1012 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZEISS DIC + Tensile All-in-One</title>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
+<style>
+:root{
+  --bg:#f6f7fb; --card:#fff; --text:#202637; --muted:#737b8a;
+  --line:#e2e6ed; --accent:#4967e8; --soft:#eef1ff;
+  --ok:#237547; --bad:#b83333;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--text)}
+.wrap{max-width:1220px;margin:30px auto;padding:0 18px 45px}
+h1{margin:0 0 8px;font-size:28px}
+.subtitle{color:var(--muted);line-height:1.6;margin-bottom:22px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:21px;margin-bottom:18px;box-shadow:0 4px 18px rgba(30,40,70,.04)}
+.step-title{font-size:18px;font-weight:700;margin-bottom:14px}
+.upload-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.drop{border:2px dashed #bac1cf;border-radius:14px;padding:27px 14px;text-align:center;cursor:pointer;background:#fbfcff;min-height:140px;display:flex;flex-direction:column;justify-content:center}
+.drop.drag{border-color:var(--accent);background:var(--soft)}
+.drop.loaded{border-style:solid;border-color:#87b89a;background:#f6fcf8}
+.drop b{display:block;font-size:15px;margin-bottom:7px;word-break:break-all}
+.drop span{font-size:12.5px;color:var(--muted);line-height:1.5}
+input[type=file]{display:none}
+.controls{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:16px}
+label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+input[type=number],select{width:100%;border:1px solid var(--line);border-radius:9px;padding:10px 11px;background:#fff;font-size:14px}
+.checkrow{display:flex;align-items:center;gap:8px;margin-top:14px;font-size:14px;color:#4e5667}
+.checkrow label{margin:0;font-size:14px;color:#4e5667}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:17px}
+button{border:0;border-radius:9px;padding:10px 15px;font-size:14px;font-weight:700;cursor:pointer}
+.primary{background:var(--accent);color:#fff}.secondary{background:#edf0f5;color:#2f3749}
+button:disabled{opacity:.45;cursor:default}
+.status{margin-top:13px;color:var(--muted);font-size:13.5px;line-height:1.55;white-space:pre-wrap}
+.status.ok{color:var(--ok)}.status.bad{color:var(--bad)}
+.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.box{background:#f8f9fc;border-radius:10px;padding:12px}
+.box small{display:block;color:var(--muted);margin-bottom:5px}.box strong{font-size:14px}
+.chart{height:440px}
+.table-wrap{overflow:auto;max-height:360px;border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{padding:8px 10px;border-bottom:1px solid #eceef3;text-align:right;white-space:nowrap}
+th{position:sticky;top:0;background:#fafbfe;z-index:1}
+.note{font-size:12px;color:var(--muted);line-height:1.55;margin-top:10px}
+.hidden{display:none}
+hr{border:0;border-top:1px solid var(--line);margin:18px 0}
+@media(max-width:900px){
+  .upload-grid,.controls,.summary{grid-template-columns:1fr 1fr}
+}
+@media(max-width:600px){
+  .upload-grid,.controls,.summary{grid-template-columns:1fr}
+  .chart{height:390px}
+}
+</style>
+</head>
+
+<body>
+<div class="wrap">
+  <h1>ZEISS DIC + Tensile All-in-One</h1>
+  <div class="subtitle">
+    file_list 촬영시간 → ZEISS raw distance smoothing → zeroing → 1초 fitting →
+    tensile <b>ULM-T5 (N)</b> 병합 → strain / stress 계산
+  </div>
+
+  <div class="card">
+    <div class="step-title">① 파일 넣기</div>
+    <div class="upload-grid">
+      <div id="listDrop" class="drop">
+        <b>file_list</b>
+        <span>사진 촬영시간이 들어있는 CSV<br>예: file_list_2.csv</span>
+        <input id="listInput" type="file" accept=".csv,.xlsx,.xls">
+      </div>
+
+      <div id="zeissDrop" class="drop">
+        <b>ZEISS raw data</b>
+        <span>사진번호 + LXY distance [mm]<br>예: ZEISS raw data.csv</span>
+        <input id="zeissInput" type="file" accept=".csv,.xlsx,.xls">
+      </div>
+
+      <div id="tenDrop" class="drop">
+        <b>Tensile raw data</b>
+        <span>TIME - Second + ULM-T5 - N<br>Excel / CSV</span>
+        <input id="tenInput" type="file" accept=".csv,.xlsx,.xls">
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="preBtn" class="primary" disabled>DIC 전처리</button>
+      <button id="fitExcelBtn" class="secondary" disabled>Fitting data Excel 저장</button>
+    </div>
+    <div id="preStatus" class="status"></div>
+  </div>
+
+  <div id="fileListElapsedCard" class="card hidden">
+    <div class="step-title">file_list 파일명 기준 촬영 간격</div>
+    <div id="fileListElapsedInfo" class="status"></div>
+    <div class="table-wrap"><table id="fileListElapsedTable"></table></div>
+    <div class="actions">
+      <button id="fileListDownloadBtn" class="secondary">경과시간 CSV로 저장</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="step-title">② ZEISS raw smoothing 설정</div>
+
+    <div class="checkrow">
+      <input id="smoothOn" type="checkbox" checked>
+      <label for="smoothOn"><b>ZEISS raw LXY distance smoothing 적용</b></label>
+    </div>
+
+    <div class="controls">
+      <div>
+        <label>Smoothing window</label>
+        <select id="smoothWindow">
+          <option value="5">5 points · weak</option>
+          <option value="7" selected>7 points · medium</option>
+          <option value="9">9 points · stronger</option>
+          <option value="11">11 points · strong</option>
+        </select>
+      </div>
+      <div>
+        <label>Polynomial order</label>
+        <select id="polyOrder">
+          <option value="1">1 · linear</option>
+          <option value="2" selected>2 · quadratic</option>
+        </select>
+      </div>
+      <div>
+        <label>Smoothing 대상</label>
+        <select disabled>
+          <option>전체 ZEISS raw distance</option>
+        </select>
+      </div>
+      <div>
+        <label>1초 fitting</label>
+        <input type="number" value="1" disabled>
+      </div>
+    </div>
+
+    <div class="note">
+      ZEISS의 <b>absolute LXY distance 자체를 먼저 smoothing</b>한 뒤,
+      smoothing된 첫 거리값을 기준으로 displacement를 계산합니다.
+      이후 file_list 시간 매칭과 1초 interpolation이 진행됩니다.
+      Raw distance도 Excel에 그대로 보존됩니다.
+    </div>
+  </div>
+
+  <div id="dicSummaryCard" class="card hidden">
+    <div class="summary">
+      <div class="box"><small>ZEISS points</small><strong id="nZeiss">-</strong></div>
+      <div class="box"><small>Baseline distance</small><strong id="baseDist">-</strong></div>
+      <div class="box"><small>Actual time range</small><strong id="timeRange">-</strong></div>
+      <div class="box"><small>Time detection</small><strong id="timeMethod">-</strong></div>
+    </div>
+  </div>
+
+  <div id="dicChartCard" class="card hidden">
+    <h3>DIC displacement preprocessing</h3>
+    <div id="dicChart" class="chart"></div>
+  </div>
+
+  <div id="fitTableCard" class="card hidden">
+    <h3>Fitting data 미리보기</h3>
+    <div class="table-wrap"><table id="fitTable"></table></div>
+  </div>
+
+  <div class="card">
+    <div class="step-title">③ Tensile 병합 + Stress–Strain</div>
+
+    <div class="controls">
+      <div>
+        <label>Gauge length [mm]</label>
+        <input id="gauge" type="number" step="any" value="12.46">
+      </div>
+      <div>
+        <label>Area [mm²]</label>
+        <input id="area" type="number" step="any" value="9">
+      </div>
+      <div>
+        <label>최종 DIC zero</label>
+        <select id="zeroMode">
+          <option value="firstTensile" selected>첫 tensile 시점 기준</option>
+          <option value="photoStart">첫 사진 기준</option>
+        </select>
+      </div>
+      <div>
+        <label>1초 fitting</label>
+        <input type="number" value="1" disabled>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="mergeBtn" class="primary" disabled>최종 병합하기</button>
+      <button id="finalExcelBtn" class="secondary" disabled>최종 Excel 다운로드</button>
+      <button id="stressPngBtn" class="secondary" disabled>Stress–Strain PNG</button>
+    </div>
+    <div id="mergeStatus" class="status"></div>
+
+    <div class="note">
+      저장 위치를 매번 고르려면 Chrome → 설정 → 다운로드 →
+      <b>“다운로드 전에 각 파일의 저장 위치 확인”</b>을 켜주세요.
+      ChatGPT 미리보기보다 이 HTML 파일을 PC에 저장한 뒤 Chrome에서 직접 실행하는 것을 권장합니다.
+    </div>
+  </div>
+
+  <div id="finalSummaryCard" class="card hidden">
+    <div class="summary">
+      <div class="box"><small>Tensile points</small><strong id="nTen">-</strong></div>
+      <div class="box"><small>Merged points</small><strong id="nMerge">-</strong></div>
+      <div class="box"><small>ZEISS raw smoothing</small><strong id="smoothCutInfo">-</strong></div>
+      <div class="box"><small>DIC final zero</small><strong id="zeroInfo">-</strong></div>
+    </div>
+  </div>
+
+  <div id="stressCard" class="card hidden">
+    <h3>Stress–Strain</h3>
+    <div id="stressChart" class="chart"></div>
+  </div>
+
+  <div id="finalTableCard" class="card hidden">
+    <h3>최종 병합 데이터 미리보기</h3>
+    <div class="table-wrap"><table id="finalTable"></table></div>
+  </div>
+</div>
+
+<script>
+let listWB=null, zeissWB=null, tenWB=null;
+let listName="file_list", zeissName="ZEISS_raw", tenName="Tensile";
+
+let dicRaw=null;          // {times, abs, rawDisp, timeMethod, baseline}
+let tensile=null;         // {time, force, displacement}
+let dicProcessed=null;    // {usedDisp, smoothDisp, cutoffTime, actualRows, fitted1s}
+let merged=[];
+let fileListElapsedRows=[]; // [{name,time,step,total}] parsed from filename timestamps
+
+const $=id=>document.getElementById(id);
+
+setupDrop("listDrop","listInput","list");
+setupDrop("zeissDrop","zeissInput","zeiss");
+setupDrop("tenDrop","tenInput","ten");
+
+function setupDrop(zoneId,inputId,type){
+  const zone=$(zoneId), input=$(inputId);
+  zone.onclick=()=>input.click();
+  zone.addEventListener("dragover",e=>{e.preventDefault();zone.classList.add("drag")});
+  zone.addEventListener("dragleave",()=>zone.classList.remove("drag"));
+  zone.addEventListener("drop",e=>{
+    e.preventDefault(); zone.classList.remove("drag");
+    if(e.dataTransfer.files.length) readFile(e.dataTransfer.files[0],type,zone);
+  });
+  input.addEventListener("change",e=>{
+    if(e.target.files.length) readFile(e.target.files[0],type,zone);
+  });
+}
+
+function readFile(file,type,zone){
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      let wb;
+      const ext=file.name.split(".").pop().toLowerCase();
+      if(ext==="csv"){
+        const bytes=new Uint8Array(e.target.result);
+        const text=new TextDecoder("utf-8").decode(bytes);
+        wb=XLSX.read(text,{type:"string"});
+      }else{
+        wb=XLSX.read(new Uint8Array(e.target.result),{type:"array"});
+      }
+
+      if(type==="list"){
+        listWB=wb;listName=strip(file.name);
+        const items=parseFileNameTimestamps(wb);
+        if(items){
+          fileListElapsedRows=buildFileListElapsedRows(items);
+          renderFileListElapsedTable(fileListElapsedRows);
+          setStatus("fileListElapsedInfo","파일명에서 촬영시각 "+items.length+"개를 인식했습니다 (첫 사진 기준 경과시간, 첫 행이 파일명 형식이 아니면 자동으로 제외됩니다).","ok");
+          $("fileListElapsedCard").classList.remove("hidden");
+        }else{
+          fileListElapsedRows=[];
+          $("fileListElapsedCard").classList.add("hidden");
+        }
+      }
+      if(type==="zeiss"){zeissWB=wb;zeissName=strip(file.name)}
+      if(type==="ten"){tenWB=wb;tenName=strip(file.name)}
+
+      zone.classList.add("loaded");
+      zone.querySelector("b").textContent="✓ "+file.name;
+
+      $("preBtn").disabled=!(listWB&&zeissWB);
+      $("mergeBtn").disabled=!(listWB&&zeissWB&&tenWB);
+
+      setStatus("preStatus","파일을 읽었습니다.","");
+    }catch(err){
+      setStatus("preStatus","파일 읽기 오류: "+err.message,"bad");
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function strip(s){return s.replace(/\.(csv|xlsx|xls)$/i,"")}
+function norm(v){return String(v??"").trim().toLowerCase().replace(/[_\-\/()]+/g," ").replace(/\s+/g," ")}
+function toNum(v){
+  if(typeof v==="number") return Number.isFinite(v)?v:NaN;
+  if(v===null||v===undefined||v==="") return NaN;
+  return Number(String(v).replace(/,/g,"").trim());
+}
+function setStatus(id,msg,type=""){$(id).textContent=msg;$(id).className="status "+type}
+function aoa(wb,s=wb.SheetNames[0]){return XLSX.utils.sheet_to_json(wb.Sheets[s],{header:1,defval:null,raw:true})}
+function fmt(v){
+  if(v===null||v===undefined||!Number.isFinite(Number(v)))return "";
+  const n=Number(v);
+  if(Math.abs(n)>0 && Math.abs(n)<1e-4)return n.toExponential(6);
+  return Number(n.toPrecision(10)).toString();
+}
+
+/* ---------------- ZEISS RAW ---------------- */
+
+function parseZeiss(wb){
+  for(const s of wb.SheetNames){
+    const rows=aoa(wb,s);
+    if(rows.length<2)continue;
+
+    let headerRow=0;
+    // first few rows: choose row with LXY/mm text if available
+    for(let r=0;r<Math.min(8,rows.length);r++){
+      const texts=(rows[r]||[]).map(norm);
+      if(texts.some(x=>x.includes("lxy"))){headerRow=r;break}
+    }
+
+    const headers=(rows[headerRow]||[]).map(x=>String(x??""));
+    let distCol=-1;
+
+    headers.forEach((h,i)=>{
+      const n=norm(h);
+      if(distCol<0 && n.includes("lxy") && n.includes("mm")) distCol=i;
+    });
+    if(distCol<0){
+      headers.forEach((h,i)=>{
+        const n=norm(h);
+        if(distCol<0 && n.includes("lxy")) distCol=i;
+      });
+    }
+
+    // fallback: choose numeric column that is not a simple frame counter
+    if(distCol<0){
+      let best={score:-1,col:-1};
+      const maxCols=Math.max(...rows.slice(headerRow+1).map(r=>r.length));
+      for(let c=0;c<maxCols;c++){
+        const vals=rows.slice(headerRow+1).map(r=>toNum(r[c])).filter(Number.isFinite);
+        if(vals.length<5)continue;
+        const median=[...vals].sort((a,b)=>a-b)[Math.floor(vals.length/2)];
+        const diffs=vals.slice(1).map((v,i)=>v-vals[i]);
+        const frameLike=diffs.length && diffs.filter(d=>Math.abs(d-1)<1e-9).length/diffs.length>0.9;
+        let score=vals.length+(Math.abs(median)>1?20:0)-(frameLike?50:0);
+        if(score>best.score)best={score,col:c};
+      }
+      distCol=best.col;
+    }
+
+    if(distCol<0)continue;
+
+    const abs=[];
+    for(let r=headerRow+1;r<rows.length;r++){
+      const v=toNum(rows[r][distCol]);
+      // keep row alignment including missing value
+      if(rows[r].some(x=>x!==null&&x!=="")) abs.push(Number.isFinite(v)?v:null);
+    }
+
+    if(abs.length<2)continue;
+    const firstValid=abs.find(v=>v!==null);
+    if(firstValid===undefined)continue;
+
+    return {sheet:s,abs,baseline:firstValid,distCol,header:headers[distCol]||("Column "+(distCol+1))};
+  }
+  throw new Error("ZEISS raw에서 LXY distance 열을 찾지 못했습니다.");
+}
+
+/* ---------------- FILE NAME TIMESTAMP (WIN_YYYYMMDD_HH_MM_SS_Pro.jpg 등) ---------------- */
+
+// 파일명 문자열에서 YYYYMMDD_HH_MM_SS 패턴을 찾아 Date로 변환.
+// "file_list.csv" 같이 패턴이 없는 행(주로 첫 행)은 자동으로 제외됨.
+function parseFileNameTimestamps(wb){
+  const re=/(\d{8})_(\d{2})_(\d{2})_(\d{2})/;
+  let items=[];
+  for(const s of wb.SheetNames){
+    const rows=aoa(wb,s);
+    items=[];
+    for(const row of rows){
+      if(!row||row[0]===null||row[0]===undefined)continue;
+      const name=String(row[0]).trim();
+      const m=name.match(re);
+      if(!m)continue;
+      const y=+m[1].slice(0,4),mo=+m[1].slice(4,6),d=+m[1].slice(6,8);
+      const h=+m[2],mi=+m[3],sec=+m[4];
+      if(mo<1||mo>12||d<1||d>31||h>23||mi>59||sec>59)continue;
+      const dt=new Date(y,mo-1,d,h,mi,sec);
+      if(isNaN(dt.getTime()))continue;
+      items.push({name,dt});
+    }
+    if(items.length>=2)return items; // 파일명 형식을 인식한 시트를 찾으면 바로 사용
+  }
+  return null;
+}
+
+// 첫 유효 사진 기준 누적 경과(초)와 직전 사진 대비 간격(초)을 계산.
+function buildFileListElapsedRows(items){
+  const t0=items[0].dt.getTime();
+  let prev=t0;
+  return items.map((it,i)=>{
+    const total=Math.round((it.dt.getTime()-t0)/1000);
+    const step=i===0?0:Math.round((it.dt.getTime()-prev)/1000);
+    prev=it.dt.getTime();
+    return{
+      name:it.name,
+      time:it.dt.getFullYear()+"-"+String(it.dt.getMonth()+1).padStart(2,"0")+"-"+String(it.dt.getDate()).padStart(2,"0")+
+           " "+String(it.dt.getHours()).padStart(2,"0")+":"+String(it.dt.getMinutes()).padStart(2,"0")+":"+String(it.dt.getSeconds()).padStart(2,"0"),
+      step,total
+    };
+  });
+}
+
+function renderFileListElapsedTable(rows){
+  const table=$("fileListElapsedTable");table.innerHTML="";
+  const thd=document.createElement("tr");
+  ["#","파일명","촬영시각","이전 대비(초)","누적 경과(초)"].forEach(h=>{
+    const th=document.createElement("th");th.textContent=h;thd.appendChild(th);
+  });
+  table.appendChild(thd);
+  const tb=document.createElement("tbody");
+  rows.forEach((r,i)=>{
+    const tr=document.createElement("tr");
+    [i+1,r.name,r.time,r.step,r.total].forEach((v,ci)=>{
+      const td=document.createElement("td");
+      td.textContent=v;
+      if(ci===1||ci===2)td.style.textAlign="left";
+      tr.appendChild(td);
+    });
+    tb.appendChild(tr);
+  });
+  table.appendChild(tb);
+}
+
+function downloadFileListElapsed(rows){
+  const header=["파일명","촬영시각","이전 대비(초)","누적 경과(초)"];
+  const lines=[header.join(",")];
+  rows.forEach(r=>lines.push(['"'+r.name+'"','"'+r.time+'"',r.step,r.total].join(",")));
+  const csv="\uFEFF"+lines.join("\r\n");
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;a.download=(listName||"file_list")+"_elapsed.csv";
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+$("fileListDownloadBtn").addEventListener("click",()=>{
+  if(fileListElapsedRows.length)downloadFileListElapsed(fileListElapsedRows);
+});
+
+/* ---------------- FILE LIST TIME ---------------- */
+
+function isMonotonic(arr){
+  for(let i=1;i<arr.length;i++) if(arr[i]<arr[i-1])return false;
+  return true;
+}
+
+function parseFileList(wb,nNeeded){
+  for(const s of wb.SheetNames){
+    const rows=aoa(wb,s);
+    const maxCols=Math.max(...rows.map(r=>r.length));
+
+    // 1) Prefer an already calculated elapsed-time column:
+    // exactly nNeeded numeric points, starts at 0, monotonic.
+    let best=null;
+    for(let c=0;c<maxCols;c++){
+      const vals=[];
+      for(let r=0;r<rows.length;r++){
+        const v=toNum(rows[r][c]);
+        if(Number.isFinite(v))vals.push(v);
+      }
+      if(vals.length===nNeeded && Math.abs(vals[0])<1e-9 && isMonotonic(vals)){
+        const range=vals[vals.length-1]-vals[0];
+        if(range>0){
+          const score=1000+range;
+          if(!best||score>best.score)best={times:vals,method:"elapsed-time column "+(c+1),score};
+        }
+      }
+    }
+    if(best)return {sheet:s,times:best.times,method:best.method};
+
+    // 2) Find plausible H/M/S triplet and use the last nNeeded timestamp rows.
+    for(let c=0;c<maxCols-2;c++){
+      const stamps=[];
+      for(let r=0;r<rows.length;r++){
+        const h=toNum(rows[r][c]),m=toNum(rows[r][c+1]),sec=toNum(rows[r][c+2]);
+        if(Number.isInteger(h)&&Number.isInteger(m)&&Number.isInteger(sec)&&
+           h>=0&&h<=23&&m>=0&&m<=59&&sec>=0&&sec<=59){
+          stamps.push({r,h,m,sec});
+        }
+      }
+      if(stamps.length>=nNeeded){
+        const block=stamps.slice(-nNeeded);
+        let unwrapped=[],day=0,prev=null;
+        block.forEach(x=>{
+          let total=x.h*3600+x.m*60+x.sec+day*86400;
+          if(prev!==null && total<prev){day++;total+=86400}
+          unwrapped.push(total);prev=total;
+        });
+        if(isMonotonic(unwrapped)){
+          const t0=unwrapped[0];
+          return {
+            sheet:s,
+            times:unwrapped.map(v=>v-t0),
+            method:"H:M:S columns "+(c+1)+"-"+(c+3)+" (last "+nNeeded+" photos)"
+          };
+        }
+      }
+    }
+  }
+  throw new Error("file_list에서 ZEISS point 수와 맞는 촬영시간을 찾지 못했습니다.");
+}
+
+function buildDicRaw(){
+  const z=parseZeiss(zeissWB);
+  const t=parseFileList(listWB,z.abs.length);
+
+  if(t.times.length!==z.abs.length)throw new Error("file_list 시간 수와 ZEISS point 수가 일치하지 않습니다.");
+
+  const rawDisp=z.abs.map(v=>v===null?null:v-z.baseline);
+
+  dicRaw={
+    times:t.times,
+    abs:z.abs,
+    rawDisp,
+    baseline:z.baseline,
+    timeMethod:t.method,
+    listSheet:t.sheet,
+    zeissSheet:z.sheet,
+    distanceHeader:z.header
+  };
+}
+
+/* ---------------- TENSILE ---------------- */
+
+function parseTensile(wb){
+  for(const s of wb.SheetNames){
+    const rows=aoa(wb,s);
+    for(let hr=0;hr<Math.min(35,rows.length);hr++){
+      const heads=(rows[hr]||[]).map(norm);
+      let tc=-1,fc=-1,dc=-1;
+      heads.forEach((h,i)=>{
+        if(tc<0 && ((h.includes("time")&&h.includes("second"))||h==="second"||h==="time s"))tc=i;
+        if(fc<0 && h.includes("ulm")&&h.includes("t5"))fc=i;
+        if(dc<0 && h.includes("displacement")&&h.includes("mm"))dc=i;
+      });
+      if(tc<0||fc<0)continue;
+
+      const data=[];
+      for(let r=hr+1;r<rows.length;r++){
+        const time=toNum(rows[r][tc]),force=toNum(rows[r][fc]);
+        const disp=dc>=0?toNum(rows[r][dc]):NaN;
+        if(Number.isFinite(time)&&Number.isFinite(force)){
+          data.push({time,force,displacement:Number.isFinite(disp)?disp:null});
+        }
+      }
+      data.sort((a,b)=>a.time-b.time);
+      if(data.length>=2)return {sheet:s,data};
+    }
+  }
+  throw new Error("Tensile raw에서 TIME - Second / ULM-T5 - N 열을 찾지 못했습니다.");
+}
+
+/* ---------------- ZEISS RAW SMOOTHING ---------------- */
+
+function solve2(A,b){
+  const det=A[0][0]*A[1][1]-A[0][1]*A[1][0];
+  if(Math.abs(det)<1e-14)return null;
+  return [
+    (b[0]*A[1][1]-A[0][1]*b[1])/det,
+    (A[0][0]*b[1]-b[0]*A[1][0])/det
+  ];
+}
+
+function solve3(A,b){
+  const M=A.map((row,i)=>[...row,b[i]]);
+  for(let i=0;i<3;i++){
+    let piv=i;
+    for(let r=i+1;r<3;r++){
+      if(Math.abs(M[r][i])>Math.abs(M[piv][i]))piv=r;
+    }
+    if(Math.abs(M[piv][i])<1e-14)return null;
+    [M[i],M[piv]]=[M[piv],M[i]];
+    const d=M[i][i];
+    for(let c=i;c<4;c++)M[i][c]/=d;
+    for(let r=0;r<3;r++){
+      if(r===i)continue;
+      const f=M[r][i];
+      for(let c=i;c<4;c++)M[r][c]-=f*M[i][c];
+    }
+  }
+  return [M[0][3],M[1][3],M[2][3]];
+}
+
+function localPolyPredict(times,values,targetIndex,validIndices,window,order){
+  const pos=validIndices.indexOf(targetIndex);
+  if(pos<0)return values[targetIndex];
+
+  let half=Math.floor(window/2);
+  let a=Math.max(0,pos-half);
+  let b=Math.min(validIndices.length,a+window);
+  a=Math.max(0,b-window);
+  const ids=validIndices.slice(a,b);
+
+  if(ids.length<(order+1))return values[targetIndex];
+
+  const t0=times[targetIndex];
+
+  if(order===1){
+    let S0=0,S1=0,S2=0,Y0=0,Y1=0;
+    ids.forEach(i=>{
+      const x=times[i]-t0, y=values[i];
+      S0+=1; S1+=x; S2+=x*x; Y0+=y; Y1+=x*y;
+    });
+    const sol=solve2([[S0,S1],[S1,S2]],[Y0,Y1]);
+    return sol?sol[0]:values[targetIndex];
+  }
+
+  let S0=0,S1=0,S2=0,S3=0,S4=0,Y0=0,Y1=0,Y2=0;
+  ids.forEach(i=>{
+    const x=times[i]-t0, y=values[i], x2=x*x;
+    S0+=1; S1+=x; S2+=x2; S3+=x2*x; S4+=x2*x2;
+    Y0+=y; Y1+=x*y; Y2+=x2*y;
+  });
+  const sol=solve3(
+    [[S0,S1,S2],[S1,S2,S3],[S2,S3,S4]],
+    [Y0,Y1,Y2]
+  );
+  return sol?sol[0]:values[targetIndex];
+}
+
+function smoothZeissAbsolute(){
+  const times=dicRaw.times;
+  const rawAbs=dicRaw.abs;
+
+  if(!$("smoothOn").checked){
+    const baseline=rawAbs.find(v=>v!==null);
+    return {smoothAbs:[...rawAbs],baseline,mode:"OFF"};
+  }
+
+  const window=parseInt($("smoothWindow").value);
+  const order=parseInt($("polyOrder").value);
+  const validIndices=[];
+  rawAbs.forEach((v,i)=>{
+    if(v!==null && Number.isFinite(v))validIndices.push(i);
+  });
+
+  const smoothAbs=[...rawAbs];
+  validIndices.forEach(i=>{
+    smoothAbs[i]=localPolyPredict(times,rawAbs,i,validIndices,window,order);
+  });
+
+  const baseline=smoothAbs[validIndices[0]];
+  return {
+    smoothAbs,
+    baseline,
+    mode:`${window}-point local polynomial, order ${order}`
+  };
+}
+
+/* ---------------- INTERPOLATION ---------------- */
+
+function interpolateAt(t,times,values){
+  const pts=[];
+  for(let i=0;i<times.length;i++){
+    const y=values[i];
+    if(y!==null && Number.isFinite(y))pts.push({t:times[i],y});
+  }
+  if(!pts.length||t<pts[0].t||t>pts[pts.length-1].t)return NaN;
+  if(Math.abs(t-pts[0].t)<1e-12)return pts[0].y;
+  if(Math.abs(t-pts[pts.length-1].t)<1e-12)return pts[pts.length-1].y;
+
+  let lo=0,hi=pts.length-1;
+  while(hi-lo>1){
+    const m=Math.floor((lo+hi)/2);
+    if(pts[m].t<=t)lo=m;else hi=m;
+  }
+  const a=pts[lo],b=pts[hi];
+  if(Math.abs(t-a.t)<1e-12)return a.y;
+  if(Math.abs(t-b.t)<1e-12)return b.y;
+  return a.y+(b.y-a.y)*(t-a.t)/(b.t-a.t);
+}
+
+function makeProcessed(){
+  if(!dicRaw)buildDicRaw();
+
+  const sm=smoothZeissAbsolute();
+  const smoothedDisp=sm.smoothAbs.map(v=>v===null?null:v-sm.baseline);
+
+  const actualRows=dicRaw.times.map((t,i)=>({
+    "Actual time":t,
+    "ZEISS raw distance [mm]":dicRaw.abs[i],
+    "ZEISS smoothed distance [mm]":sm.smoothAbs[i],
+    "Raw displacement [mm]":dicRaw.rawDisp[i],
+    "Smoothed displacement [mm]":smoothedDisp[i]
+  }));
+
+  const start=Math.ceil(dicRaw.times[0]);
+  const end=Math.floor(dicRaw.times[dicRaw.times.length-1]);
+  const actualMap=new Map();
+
+  dicRaw.times.forEach((t,i)=>{
+    if(smoothedDisp[i]!==null)actualMap.set(t,smoothedDisp[i]);
+  });
+
+  const fitted1s=[];
+  for(let t=start;t<=end;t++){
+    fitted1s.push({
+      "second":t,
+      "Actual_Data":actualMap.has(t)?actualMap.get(t):null,
+      "fitted_mm":interpolateAt(t,dicRaw.times,smoothedDisp)
+    });
+  }
+
+  dicProcessed={
+    smoothAbs:sm.smoothAbs,
+    smoothedDisp,
+    smoothBaseline:sm.baseline,
+    smoothingMode:sm.mode,
+    actualRows,
+    fitted1s
+  };
+}
+
+/* ---------------- DIC BUTTON ---------------- */
+
+$("preBtn").onclick=()=>{
+  try{
+    tensile=tenWB?parseTensile(tenWB):null;
+    buildDicRaw();
+    makeProcessed();
+
+    $("nZeiss").textContent=dicRaw.times.length+" points";
+    $("baseDist").textContent=fmt(dicRaw.baseline)+" mm";
+    $("timeRange").textContent=fmt(dicRaw.times[0])+"–"+fmt(dicRaw.times[dicRaw.times.length-1])+" s";
+    $("timeMethod").textContent=dicRaw.timeMethod;
+    $("dicSummaryCard").classList.remove("hidden");
+
+    drawDicChart();
+    drawFitTable();
+
+    $("dicChartCard").classList.remove("hidden");
+    $("fitTableCard").classList.remove("hidden");
+    $("fitExcelBtn").disabled=false;
+    $("mergeBtn").disabled=!(tenWB);
+
+    setStatus("preStatus",
+      `DIC 전처리 완료 ✓
+file_list 시간 ${dicRaw.times.length}개와 ZEISS distance ${dicRaw.abs.length}개를 자동 매칭했습니다.
+ZEISS raw smoothing: ${dicProcessed.smoothingMode}
+Smoothed baseline: ${fmt(dicProcessed.smoothBaseline)} mm
+→ smoothed distance에서 baseline을 빼 displacement를 만들었습니다.`,
+      "ok"
+    );
+  }catch(err){
+    setStatus("preStatus","DIC 전처리 오류: "+err.message,"bad");
+  }
+};
+
+function drawDicChart(){
+  const traces=[
+    {
+      x:dicRaw.times,y:dicRaw.abs,
+      mode:"lines+markers",name:"ZEISS raw distance",
+      marker:{size:5},line:{width:1}
+    },
+    {
+      x:dicRaw.times,y:dicProcessed.smoothAbs,
+      mode:"lines",name:"ZEISS smoothed distance",
+      line:{width:2}
+    }
+  ];
+
+  Plotly.newPlot("dicChart",traces,{
+    margin:{l:75,r:25,t:20,b:60},
+    xaxis:{title:"Actual time (s)",showgrid:true,zeroline:false},
+    yaxis:{title:"LXY distance (mm)",showgrid:true,zeroline:false},
+    legend:{orientation:"h",y:1.12},
+    paper_bgcolor:"#fff",plot_bgcolor:"#fff"
+  },{responsive:true,displaylogo:false});
+}
+
+function renderTable(id,rows,headers,maxRows=500){
+  const table=$(id);table.innerHTML="";
+  const thd=document.createElement("thead"),tr=document.createElement("tr");
+  headers.forEach(h=>{const th=document.createElement("th");th.textContent=h;tr.appendChild(th)});
+  thd.appendChild(tr);table.appendChild(thd);
+  const tb=document.createElement("tbody");
+  rows.slice(0,maxRows).forEach(row=>{
+    const tr=document.createElement("tr");
+    headers.forEach(h=>{const td=document.createElement("td");td.textContent=fmt(row[h]);tr.appendChild(td)});
+    tb.appendChild(tr);
+  });
+  table.appendChild(tb);
+}
+
+function drawFitTable(){
+  renderTable("fitTable",dicProcessed.actualRows,
+    ["Actual time","ZEISS raw distance [mm]","ZEISS smoothed distance [mm]","Raw displacement [mm]","Smoothed displacement [mm]"],300);
+}
+
+/* ---------------- MERGE ---------------- */
+
+$("mergeBtn").onclick=()=>{
+  try{
+    if(!listWB||!zeissWB||!tenWB)throw new Error("세 파일을 모두 넣어주세요.");
+    tensile=parseTensile(tenWB);
+    buildDicRaw();
+    makeProcessed(); // refresh smoothing settings
+
+    const gauge=toNum($("gauge").value),area=toNum($("area").value);
+    if(!Number.isFinite(gauge)||gauge<=0)throw new Error("Gauge length를 확인해 주세요.");
+    if(!Number.isFinite(area)||area<=0)throw new Error("Area를 확인해 주세요.");
+
+    const t0=dicProcessed.fitted1s[0].second;
+    const t1=dicProcessed.fitted1s[dicProcessed.fitted1s.length-1].second;
+
+    const overlap=tensile.data.filter(r=>r.time>=t0&&r.time<=t1);
+    if(!overlap.length)throw new Error("DIC와 tensile 시간 범위가 겹치지 않습니다.");
+
+    const firstDic=interpolateAt(overlap[0].time,
+      dicProcessed.fitted1s.map(r=>r.second),
+      dicProcessed.fitted1s.map(r=>r.fitted_mm)
+    );
+
+    merged=overlap.map(r=>{
+      const d=interpolateAt(r.time,
+        dicProcessed.fitted1s.map(x=>x.second),
+        dicProcessed.fitted1s.map(x=>x.fitted_mm)
+      );
+      const delta=$("zeroMode").value==="firstTensile" ? d-firstDic : d;
+      return {
+        "TIME - Second":r.time,
+        "Tensile Displacement - mm":r.displacement,
+        "ULM-T5 - N":r.force,
+        "DIC fitted_mm":d,
+        "DIC ΔDisplacement - mm":delta,
+        "Strain (%)":delta/gauge*100,
+        "Stress (MPa)":r.force/area
+      };
+    });
+
+    $("nTen").textContent=tensile.data.length+" points";
+    $("nMerge").textContent=merged.length+" points";
+    $("smoothCutInfo").textContent=dicProcessed.smoothingMode;
+    $("zeroInfo").textContent=$("zeroMode").value==="firstTensile"
+      ? "t="+fmt(overlap[0].time)+" s"
+      : "photo start";
+
+    $("finalSummaryCard").classList.remove("hidden");
+    $("stressCard").classList.remove("hidden");
+    $("finalTableCard").classList.remove("hidden");
+
+    drawStressChart();
+    renderTable("finalTable",merged,Object.keys(merged[0]),500);
+
+    $("finalExcelBtn").disabled=false;
+    $("stressPngBtn").disabled=false;
+    $("fitExcelBtn").disabled=false;
+
+    setStatus("mergeStatus",
+      `최종 병합 완료 ✓
+Tensile 시간축 ${merged.length}개 시점에 DIC fitted displacement를 매칭했습니다.
+Stress = ULM-T5(N) / Area(mm²)
+Strain = DIC ΔDisplacement / Gauge length × 100`,
+      "ok"
+    );
+  }catch(err){
+    setStatus("mergeStatus","최종 병합 오류: "+err.message,"bad");
+  }
+};
+
+function drawStressChart(){
+  Plotly.newPlot("stressChart",[{
+    x:merged.map(r=>r["Strain (%)"]),
+    y:merged.map(r=>r["Stress (MPa)"]),
+    mode:"lines+markers",
+    name:"Stress–Strain",
+    marker:{size:4},
+    line:{width:2}
+  }],{
+    margin:{l:75,r:25,t:20,b:60},
+    xaxis:{title:"Strain (%)",showgrid:true,zeroline:false},
+    yaxis:{title:"Stress (MPa)",showgrid:true,zeroline:false},
+    paper_bgcolor:"#fff",plot_bgcolor:"#fff"
+  },{responsive:true,displaylogo:false});
+}
+
+/* ---------------- EXCEL OUTPUT ---------------- */
+
+function downloadWorkbook(wb,filename){
+  const bytes=XLSX.write(wb,{bookType:"xlsx",type:"array",compression:true});
+  const blob=new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;a.download=filename;a.style.display="none";
+  document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(url);a.remove()},1500);
+}
+
+$("fitExcelBtn").onclick=()=>{
+  try{
+    if(!dicProcessed)throw new Error("먼저 DIC 전처리를 실행해 주세요.");
+    const wb=XLSX.utils.book_new();
+
+    // Same essential two-column structure as the user's Fitting data file,
+    // plus preserved raw/smoothed columns.
+    const fitSource=dicProcessed.actualRows.map(r=>({
+      "Actual time":r["Actual time"],
+      "Actual length":r["Smoothed displacement [mm]"],
+      "ZEISS raw distance":r["ZEISS raw distance [mm]"],
+      "ZEISS smoothed distance":r["ZEISS smoothed distance [mm]"],
+      "Raw displacement":r["Raw displacement [mm]"],
+      "Smoothed displacement":r["Smoothed displacement [mm]"]
+    }));
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(fitSource),"Fitting_Source");
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(dicProcessed.fitted1s),"Processed_1s");
+
+    const method=[
+      {Item:"file_list sheet",Setting:dicRaw.listSheet},
+      {Item:"Time detection",Setting:dicRaw.timeMethod},
+      {Item:"ZEISS sheet",Setting:dicRaw.zeissSheet},
+      {Item:"ZEISS distance column",Setting:dicRaw.distanceHeader},
+      {Item:"Raw baseline distance [mm]",Setting:dicRaw.baseline},
+      {Item:"Smoothed baseline distance [mm]",Setting:dicProcessed.smoothBaseline},
+      {Item:"ZEISS raw smoothing",Setting:dicProcessed.smoothingMode},
+      {Item:"Smoothing window",Setting:$("smoothWindow").value+" points"},
+      {Item:"Polynomial order",Setting:$("polyOrder").value},
+      {Item:"Displacement",Setting:"Smoothed ZEISS distance - first smoothed ZEISS distance"},
+      {Item:"1-second fitting",Setting:"Piecewise linear interpolation using smoothed displacement"}
+    ];
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(method),"Method");
+    downloadWorkbook(wb,zeissName+"_Fitting_data.xlsx");
+  }catch(err){setStatus("preStatus","Excel 저장 오류: "+err.message,"bad")}
+};
+
+$("finalExcelBtn").onclick=()=>{
+  try{
+    if(!merged.length)throw new Error("먼저 최종 병합하기를 실행해 주세요.");
+    const wb=XLSX.utils.book_new();
+
+    // Final sheet
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(merged),"Final_Merged");
+
+    // Reproduce DIC stages
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(dicProcessed.actualRows),"DIC_Preprocessing");
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(dicProcessed.fitted1s),"DIC_1s_Fitting");
+
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(tensile.data.map(r=>({
+      "TIME - Second":r.time,
+      "Displacement - mm":r.displacement,
+      "ULM-T5 - N":r.force
+    }))),"Tensile_Raw");
+
+    const method=[
+      {Item:"file_list time",Setting:dicRaw.timeMethod},
+      {Item:"Raw ZEISS baseline [mm]",Setting:dicRaw.baseline},
+      {Item:"Smoothed ZEISS baseline [mm]",Setting:dicProcessed.smoothBaseline},
+      {Item:"ZEISS raw smoothing",Setting:dicProcessed.smoothingMode},
+      {Item:"Smoothing window",Setting:$("smoothWindow").value+" points"},
+      {Item:"Polynomial order",Setting:$("polyOrder").value},
+      {Item:"DIC displacement",Setting:"Smoothed ZEISS distance - smoothed baseline"},
+      {Item:"1-second fitting",Setting:"Linear interpolation"},
+      {Item:"Gauge length [mm]",Setting:toNum($("gauge").value)},
+      {Item:"Area [mm²]",Setting:toNum($("area").value)},
+      {Item:"DIC final zero",Setting:$("zeroMode").value},
+      {Item:"Strain formula",Setting:"DIC ΔDisplacement / Gauge length × 100"},
+      {Item:"Stress formula",Setting:"ULM-T5(N) / Area(mm²)"}
+    ];
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(method),"Method");
+
+    downloadWorkbook(wb,tenName+"_ZEISS_DIC_final.xlsx");
+    setStatus("mergeStatus","최종 Excel 다운로드를 시작했습니다. ✓","ok");
+  }catch(err){setStatus("mergeStatus","Excel 저장 오류: "+err.message,"bad")}
+};
+
+$("stressPngBtn").onclick=()=>{
+  Plotly.downloadImage("stressChart",{
+    format:"png",filename:tenName+"_stress_strain",width:1600,height:900,scale:2
+  });
+};
+
+
+// Warn inside embedded preview
+window.addEventListener("DOMContentLoaded",()=>{
+  let topLevel=false;
+  try{topLevel=(window.self===window.top)}catch(e){}
+  if(!topLevel){
+    const box=document.createElement("div");
+    box.style.cssText="position:fixed;left:15px;right:15px;bottom:15px;background:#fff3cd;border:1px solid #dfc45e;border-radius:10px;padding:11px 14px;z-index:99999;font-size:12.5px;color:#5d511b;box-shadow:0 3px 14px rgba(0,0,0,.12)";
+    box.innerHTML="<b>ChatGPT 미리보기</b>: Excel 다운로드가 막힐 수 있습니다. 이 HTML 파일을 PC에 저장한 뒤 Chrome에서 직접 열어주세요.";
+    document.body.appendChild(box);
+  }
+});
+</script>
+</body>
+</html>
